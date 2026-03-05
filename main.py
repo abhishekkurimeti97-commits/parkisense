@@ -2,8 +2,6 @@
 from flask import Flask, render_template, redirect, url_for, request, session, Response
 from werkzeug.utils import secure_filename
 from functools import wraps
-import psycopg2
-import psycopg2.extras
 import pandas as pd
 from datetime import datetime
 import os
@@ -19,33 +17,42 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
-# ── Supabase / PostgreSQL Connection ─────────────────────────────────────────
+# ── Dynamic Database Handling ────────────────────────────────────────────────
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
-def get_conn():
-    """Return a PostgreSQL connection to Supabase."""
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
+def get_db_connection():
+    """Returns a connection and the placeholder type ('%s' for PG, '?' for SQLite)"""
+    if DATABASE_URL:
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        return conn, '%s'
+    else:
+        import sqlite3
+        conn = sqlite3.connect('mydatabase.db')
+        return conn, '?'
 
 def init_db():
-    """Create tables if they don't exist and set up runtime folders."""
+    """Initialise tables in whichever database is active."""
     os.makedirs('static/img', exist_ok=True)
     os.makedirs('upload', exist_ok=True)
     try:
-        conn = get_conn()
+        conn, _ = get_db_connection()
         cur = conn.cursor()
+        
+        # Table for Users
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
                 date TEXT,
                 name TEXT NOT NULL,
-                email TEXT UNIQUE NOT NULL,
+                email TEXT PRIMARY KEY,
                 password TEXT NOT NULL,
                 pet TEXT
             )
         """)
+        
+        # Table for Results
         cur.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
-                id SERIAL PRIMARY KEY,
                 date TEXT,
                 name TEXT,
                 drawing_pred TEXT,
@@ -53,12 +60,13 @@ def init_db():
                 final_pred TEXT
             )
         """)
+        
         conn.commit()
         cur.close()
         conn.close()
-        print("DEBUG: Supabase DB initialised successfully.")
+        print(f"DEBUG: DB Initialised ({'PostgreSQL' if DATABASE_URL else 'SQLite'})")
     except Exception as e:
-        print(f"DEBUG: DB init error: {e}")
+        print(f"DEBUG: DB Init Error: {e}")
 
 init_db()
 
@@ -94,9 +102,9 @@ def login():
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password') or ''
         try:
-            conn = get_conn()
+            conn, p = get_db_connection()
             cur = conn.cursor()
-            cur.execute("SELECT name FROM users WHERE email=%s AND password=%s", (email, password))
+            cur.execute(f"SELECT name FROM users WHERE email={p} AND password={p}", (email, password))
             row = cur.fetchone()
             cur.close()
             conn.close()
@@ -137,17 +145,18 @@ def register():
             return render_template('register.html', error=error)
 
         try:
-            conn = get_conn()
+            conn, p = get_db_connection()
             cur = conn.cursor()
-            cur.execute("SELECT id FROM users WHERE email=%s", (email,))
+            cur.execute(f"SELECT name FROM users WHERE email={p}", (email,))
             if cur.fetchone():
                 cur.close()
                 conn.close()
                 error = 'User already registered!'
                 return render_template('register.html', error=error)
+            
             dt = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             cur.execute(
-                "INSERT INTO users (date, name, email, password, pet) VALUES (%s,%s,%s,%s,%s)",
+                f"INSERT INTO users (date, name, email, password, pet) VALUES ({p},{p},{p},{p},{p})",
                 (dt, name, email, password, pet)
             )
             conn.commit()
@@ -168,9 +177,9 @@ def forgot():
         email = (request.form.get('email') or '').strip().lower()
         pet = (request.form.get('pet') or '').strip().lower()
         try:
-            conn = get_conn()
+            conn, p = get_db_connection()
             cur = conn.cursor()
-            cur.execute("SELECT password FROM users WHERE email=%s AND pet=%s", (email, pet))
+            cur.execute(f"SELECT password FROM users WHERE email={p} AND pet={p}", (email, pet))
             row = cur.fetchone()
             cur.close()
             conn.close()
@@ -209,17 +218,18 @@ def dashboard():
 
     now = datetime.now()
     try:
-        conn = get_conn()
+        conn, p = get_db_connection()
         cur = conn.cursor()
+        dt_str = now.strftime("%d/%m/%Y %H:%M:%S")
         cur.execute(
-            "INSERT INTO predictions (date, name, drawing_pred, voice_pred, final_pred) VALUES (%s,%s,%s,%s,%s)",
-            (now.strftime("%d/%m/%Y %H:%M:%S"), user_name,
+            f"INSERT INTO predictions (date, name, drawing_pred, voice_pred, final_pred) VALUES ({p},{p},{p},{p},{p})",
+            (dt_str, user_name,
              'Weak Pattern' if pred == 'Parkinson' else pred,
              'Weak Pattern' if voicePred == 'Parkinson' else voicePred,
              final)
         )
         conn.commit()
-        cur.execute("SELECT date, name, drawing_pred, voice_pred, final_pred FROM predictions WHERE name=%s", (user_name,))
+        cur.execute(f"SELECT date, name, drawing_pred, voice_pred, final_pred FROM predictions WHERE name={p}", (user_name,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
