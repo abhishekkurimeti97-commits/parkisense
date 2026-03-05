@@ -34,6 +34,13 @@ def init_db():
             VoicePrediction text, FinalPrediction text
         )
     """)
+    # Seed a default demo user if none exist yet
+    cursor.execute("SELECT COUNT(*) FROM Users")
+    if cursor.fetchone()[0] == 0:
+        now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        cursor.execute("INSERT INTO Users VALUES(?,?,?,?,?)",
+                       (now, 'Demo User', 'demo@parkisense.com', 'demo1234', 'buddy'))
+        print("DEBUG: Seeded default demo user.")
     con.commit()
     con.close()
     # Ensure runtime folders exist
