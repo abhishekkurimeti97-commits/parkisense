@@ -1,7 +1,6 @@
 # import the necessary packages
 from flask import Flask, render_template, redirect, url_for, request, session, Response
 from werkzeug.utils import secure_filename
-from functools import wraps
 import sqlite3
 import pandas as pd
 from datetime import datetime
@@ -11,7 +10,7 @@ from utils import *
 from voiceTest import *
 
 app = Flask(__name__)
-app.secret_key = '1234'
+app.secret_key = 'parkisense_secret_2024'
 app.config["CACHE_TYPE"] = "null"
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -20,30 +19,17 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 
 def init_db():
-    """Create all required tables if they don't exist. Safe to call on every startup."""
+    """Create all required tables and runtime folders on startup."""
     con = sqlite3.connect('mydatabase.db')
     cursor = con.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Users (
-            Date text, Name text, Email text, password text, pet text
-        )
-    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS FinalPred (
             Date text, Name text, DrawingPrediction text,
             VoicePrediction text, FinalPrediction text
         )
     """)
-    # Seed a default demo user if none exist yet
-    cursor.execute("SELECT COUNT(*) FROM Users")
-    if cursor.fetchone()[0] == 0:
-        now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        cursor.execute("INSERT INTO Users VALUES(?,?,?,?,?)",
-                       (now, 'Demo User', 'demo@parkisense.com', 'demo1234', 'buddy'))
-        print("DEBUG: Seeded default demo user.")
     con.commit()
     con.close()
-    # Ensure runtime folders exist
     os.makedirs('static/img', exist_ok=True)
     os.makedirs('upload', exist_ok=True)
     print("DEBUG: Database initialised.")
@@ -56,112 +42,33 @@ def inject_now():
 	return {
 		'now': datetime.now(),
 		'timestamp': int(time.time()),
-		'name': session.get('name', '')
+		'name': session.get('name', 'Guest')
 	}
 
 
-def login_required(f):
-	@wraps(f)
-	def decorated_function(*args, **kwargs):
-		if 'name' not in session:
-			print(f"DEBUG: Access denied to {request.endpoint}. User not in session. Redirecting to login.")
-			return redirect(url_for('login'))
-		print(f"DEBUG: Access granted to {request.endpoint} for user {session.get('name')}")
-		return f(*args, **kwargs)
-	return decorated_function
-
-
+# ── Landing page → directly to home (no login needed) ────────────────────────
 @app.route('/')
 def landing():
-	return redirect(url_for('login'))
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-	error = None
-	if request.method == 'POST':
-		email = request.form.get('email').strip() if request.form.get('email') else ''
-		password = request.form.get('password')
-		print(f"DEBUG: Login attempt for {email} with password {password}")
-		con = sqlite3.connect('mydatabase.db')
-		cursor = con.cursor()
-		cursor.execute("SELECT Name FROM Users WHERE Email=? AND password=?", (email, password))
-		row = cursor.fetchone()
-		if row:
-			session['name'] = row[0]
-			# Initialize prediction session variables
-			session['pred'] = 'Healthy'
-			session['voicePred'] = 'Healthy'
-			print(f"DEBUG: Login successful. Session name set to {session['name']}")
-			return redirect(url_for('home'))
-		else:
-			print("DEBUG: Login failed. Invalid credentials.")
-			error = "Invalid Credentials Please try again..!!!"
-			return render_template('login.html', error=error)
-	return render_template('login.html')
-
-
-@app.route('/logout')
-def logout():
-	session.clear()
-	return redirect(url_for('login'))
-
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-	error = None
-	if request.method == 'POST' and request.form.get('sub') == 'Submit':
-		name = request.form.get('name').strip() if request.form.get('name') else ''
-		email = request.form.get('email').strip() if request.form.get('email') else ''
-		password = request.form.get('password')
-		rpassword = request.form.get('rpassword')
-		pet = request.form.get('pet')
-		if password != rpassword:
-			error = 'Password does not match..!!!'
-			return render_template('register.html', error=error)
-		con = sqlite3.connect('mydatabase.db')
-		cursor = con.cursor()
-		cursor.execute("CREATE TABLE IF NOT EXISTS Users (Date text,Name text,Email text,password text,pet text)")
-		cursor.execute("SELECT Name FROM Users WHERE Email=?", (email,))
-		if cursor.fetchone():
-			error = 'User already Registered...!!!'
-			return render_template('register.html', error=error)
-		now = datetime.now()
-		dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
-		cursor.execute("INSERT INTO Users VALUES(?,?,?,?,?)", (dt_string, name, email, password, pet))
-		con.commit()
-		return redirect(url_for('login'))
-	return render_template('register.html')
-
-
-@app.route('/forgot', methods=['GET', 'POST'])
-def forgot():
-	error = None
-	if request.method == 'POST':
-		email = request.form.get('email').strip() if request.form.get('email') else ''
-		pet = request.form.get('pet').strip() if request.form.get('pet') else ''
-		con = sqlite3.connect('mydatabase.db')
-		cursor = con.cursor()
-		cursor.execute("SELECT password FROM Users WHERE Email=? AND pet=?", (email, pet))
-		row = cursor.fetchone()
-		if row:
-			error = 'Your password : ' + row[0]
-		else:
-			error = 'Invalid information Please try again..!!!'
-		return render_template('forgot-password.html', error=error)
-	return render_template('forgot-password.html')
+	# Set a default guest name so templates work
+	if 'name' not in session:
+		session['name'] = 'Guest'
+		session['pred'] = 'Healthy'
+		session['voicePred'] = 'Healthy'
+	return redirect(url_for('home'))
 
 
 @app.route('/home', methods=['GET', 'POST'])
-@login_required
 def home():
+	if 'name' not in session:
+		session['name'] = 'Guest'
+		session['pred'] = 'Healthy'
+		session['voicePred'] = 'Healthy'
 	return render_template('home.html')
 
 
 @app.route('/dashboard', methods=['GET', 'POST'])
-@login_required
 def dashboard():
-	user_name = session.get('name', '')
+	user_name = session.get('name', 'Guest')
 	pred = session.get('pred', 'Healthy')
 	voicePred = session.get('voicePred', 'Healthy')
 
@@ -171,29 +78,43 @@ def dashboard():
 		final = 'Healthy'
 	else:
 		final = 'Further Diagnosis is Required'
-	
+
 	now = datetime.now()
 	dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
-	con = sqlite3.connect('mydatabase.db')
-	cursor = con.cursor()
-	cursor.execute("CREATE TABLE IF NOT EXISTS FinalPred (Date text,Name text,DrawingPrediction text, VoicePrediction text, FinalPrediction text)")
-	cursor.execute("INSERT INTO FinalPred VALUES(?,?,?,?,?)", (dt_string, user_name, "Weak Pattern" if pred == 'Parkinson' else pred, "Weak Pattern" if voicePred == 'Parkinson' else voicePred, final))
-	con.commit()
-	
-	conn = sqlite3.connect('mydatabase.db', isolation_level=None, detect_types=sqlite3.PARSE_COLNAMES)
-	df = pd.read_sql_query(f"SELECT * from FinalPred WHERE Name=?", conn, params=(user_name,))
+
+	try:
+		con = sqlite3.connect('mydatabase.db')
+		cursor = con.cursor()
+		cursor.execute("INSERT INTO FinalPred VALUES(?,?,?,?,?)",
+		               (dt_string, user_name,
+		                "Weak Pattern" if pred == 'Parkinson' else pred,
+		                "Weak Pattern" if voicePred == 'Parkinson' else voicePred,
+		                final))
+		con.commit()
+		conn = sqlite3.connect('mydatabase.db', isolation_level=None, detect_types=sqlite3.PARSE_COLNAMES)
+		df = pd.read_sql_query("SELECT * from FinalPred WHERE Name=?", conn, params=(user_name,))
+		conn.close()
+	except Exception as e:
+		print(f"DEBUG: Dashboard DB error: {e}")
+		import pandas as pd
+		df = pd.DataFrame(columns=['Date', 'Name', 'DrawingPrediction', 'VoicePrediction', 'FinalPrediction'])
+
 	now_date = now.strftime("%d %B %Y, %H:%M")
-	return render_template('dashboard.html', tables=[df.to_html(classes='table-responsive table table-bordered table-hover')], titles=df.columns.values, now_date=now_date)
+	return render_template('dashboard.html',
+	                       tables=[df.to_html(classes='table-responsive table table-bordered table-hover')],
+	                       titles=df.columns.values, now_date=now_date)
 
 
 @app.route('/image', methods=['GET', 'POST'])
-@login_required
 def image():
+	if 'name' not in session:
+		session['name'] = 'Guest'
+		session['pred'] = 'Healthy'
+		session['voicePred'] = 'Healthy'
 	if request.method == 'POST':
 		savepath = r'static/img/'
-		if not os.path.exists(savepath):
-			os.makedirs(savepath)
-		
+		os.makedirs(savepath, exist_ok=True)
+
 		# Check for base64 drawing data
 		drawing_data = request.form.get('drawing_data')
 		if drawing_data and ',' in drawing_data:
@@ -206,7 +127,7 @@ def image():
 				return redirect(url_for('image_test'))
 			except Exception as e:
 				print(f"DEBUG: Error saving canvas drawing: {e}")
-		
+
 		# Check for file upload
 		f = request.files.get('doc')
 		if f:
@@ -216,20 +137,23 @@ def image():
 
 
 @app.route('/image_test', methods=['GET', 'POST'])
-@login_required
 def image_test():
 	label, result, suggestion, accuracy = predictImg(r'static/img/test.jpg')
 	if label is not None:
-		session['pred'] = label  # only update session when a real prediction was made
+		session['pred'] = label
 	return render_template('image_test.html', result=result, suggestion=suggestion, confidence=accuracy)
 
 
 @app.route('/upload', methods=['GET', 'POST'])
-@login_required
 def upload():
+	if 'name' not in session:
+		session['name'] = 'Guest'
+		session['pred'] = 'Healthy'
+		session['voicePred'] = 'Healthy'
 	if request.method == 'POST':
 		if request.form.get('uploadbutton') == 'Upload':
 			savepath = r'upload/'
+			os.makedirs(savepath, exist_ok=True)
 			f = request.files.get('doc')
 			if f:
 				f.save(os.path.join(savepath, secure_filename('test.wav')))
@@ -237,10 +161,8 @@ def upload():
 		elif request.form.get('uploadbutton') == 'Detect PD':
 			voice_result = testVoice()
 			if len(voice_result) == 2:
-				# No file case: returns (label, message)
 				_, msg = voice_result
 				return render_template('upload.html', mgs=msg, accuracy=None)
-			
 			label, result, accuracy = voice_result
 			session['voicePred'] = label
 			return render_template('upload.html', mgs=result, accuracy=accuracy)
@@ -248,9 +170,29 @@ def upload():
 
 
 @app.route('/record', methods=['GET', 'POST'])
-@login_required
 def record():
+	if 'name' not in session:
+		session['name'] = 'Guest'
 	return render_template('record.html')
+
+
+# Keep login/register/logout routes but they just redirect to home now
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+	return redirect(url_for('home'))
+
+@app.route('/logout')
+def logout():
+	session.clear()
+	return redirect(url_for('home'))
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+	return redirect(url_for('home'))
+
+@app.route('/forgot', methods=['GET', 'POST'])
+def forgot():
+	return redirect(url_for('home'))
 
 
 # No caching at all for API endpoints.
