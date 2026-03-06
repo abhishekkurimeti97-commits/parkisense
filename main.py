@@ -269,7 +269,16 @@ def upload():
                 f.save(os.path.join(savepath, 'test.wav'))
                 return render_template('upload.html', file=f.filename, mgs='File uploaded..!!')
         elif request.form.get('uploadbutton') == 'Detect PD':
-            if f and f.filename:
+            audio_b64 = request.form.get('audio_base64')
+            if audio_b64 and ',' in audio_b64:
+                import base64
+                header, encoded = audio_b64.split(",", 1)
+                try:
+                    with open(os.path.join(savepath, 'test.wav'), 'wb') as f_out:
+                        f_out.write(base64.b64decode(encoded))
+                except Exception as e:
+                    print(f"DEBUG: Base64 decode error: {e}")
+            elif f and f.filename:
                 f.save(os.path.join(savepath, 'test.wav'))
                 
             voice_result = testVoice()

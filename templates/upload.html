@@ -432,6 +432,7 @@
 			<div class="canvas-wrap" style="flex-direction: column; display: flex;">
 				<form id="voiceUploadForm" action="" method="post" enctype="multipart/form-data"
 					style="width: 100%; display: flex; flex-direction: column;">
+					<input type="hidden" name="audio_base64" id="audioBase64">
 
 					<!-- Record Audio Section -->
 					<div class="record-btn-wrap">
@@ -550,7 +551,13 @@
 	// Audio file update visually
 	document.getElementById('audioInput').addEventListener('change', function (e) {
 		if (this.files && this.files.length > 0) {
-			updateUploadUI(this.files[0].name);
+			const file = this.files[0];
+			const reader = new FileReader();
+			reader.readAsDataURL(file);
+			reader.onloadend = function () {
+				document.getElementById('audioBase64').value = reader.result;
+			}
+			updateUploadUI(file.name);
 		}
 	});
 
@@ -590,8 +597,24 @@
 		dropArea.addEventListener(eventName, highlight, false);
 	});
 
-	['dragleave', 'drop'].forEach(eventName => {
+	['dragleave'].forEach(eventName => {
 		dropArea.addEventListener(eventName, unhighlight, false);
+	});
+
+	dropArea.addEventListener('drop', e => {
+		e.preventDefault();
+		unhighlight();
+		if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+			const file = e.dataTransfer.files[0];
+			document.getElementById('audioInput').files = e.dataTransfer.files;
+
+			const reader = new FileReader();
+			reader.readAsDataURL(file);
+			reader.onloadend = function () {
+				document.getElementById('audioBase64').value = reader.result;
+			}
+			updateUploadUI(file.name);
+		}
 	});
 
 	function highlight(e) {
@@ -657,16 +680,22 @@
 						stream.getTracks().forEach(track => track.stop());
 
 						const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-						// Create a file from blob
-						const file = new File([audioBlob], "recorded_voice_sample.wav", { type: 'audio/wav' });
+						// Convert blob to base64
+						const reader = new FileReader();
+						reader.readAsDataURL(audioBlob);
+						reader.onloadend = function () {
+							document.getElementById('audioBase64').value = reader.result;
 
-						// Create DataTransfer object to simulate file input
-						const dt = new DataTransfer();
-						dt.items.add(file);
+							// Fallback attempt to set input files
+							try {
+								const file = new File([audioBlob], "recorded_voice_sample.wav", { type: 'audio/wav' });
+								const dt = new DataTransfer();
+								dt.items.add(file);
+								document.getElementById('audioInput').files = dt.files;
+							} catch (e) { }
 
-						// Assign to existing input
-						document.getElementById('audioInput').files = dt.files;
-						updateUploadUI('recorded_voice_sample.wav');
+							updateUploadUI('recorded_voice_sample.wav');
+						}
 					};
 				};
 
@@ -689,7 +718,8 @@
 				alert("Please stop your recording before analysing.");
 				return;
 			}
-			if (document.getElementById('audioInput').files.length === 0) {
+			const b64 = document.getElementById('audioBase64').value;
+			if (document.getElementById('audioInput').files.length === 0 && !b64) {
 				e.preventDefault();
 				alert("Please upload or record an audio file first.");
 				return;
