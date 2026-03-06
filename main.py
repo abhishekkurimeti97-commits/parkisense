@@ -122,7 +122,7 @@ def login():
                     session['name'] = user['name']
                     return redirect(url_for('home'))
                 else:
-                    error = "Invalid credentials. Use demo@parkisense.com / demo1234 if testing."
+                    error = "Account not found. If new, click 'Create one' to register. (Or use demo@parkisense.com / demo1234)"
         except Exception as e:
             print(f"DEBUG: Login error: {e}")
             error = "Temporary connection issue. Please try again."
