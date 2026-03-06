@@ -3,12 +3,14 @@ Flask>=2.3.0
 Werkzeug>=2.3.0
 gunicorn
 pymongo[srv]
+dnspython
 
 # Data & ML
 pandas
 numpy
 scikit-learn
 joblib
+scipy
 
 # Image Processing
 Pillow
@@ -18,6 +20,7 @@ opencv-python-headless
 # Audio / Voice Analysis
 praat-parselmouth
 librosa
+soundfile
 
 # Utilities
 python-dateutil

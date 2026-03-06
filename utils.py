@@ -258,7 +258,11 @@ def predictImg(image_path='static/img/test.jpg'):
 
             pred_label_idx = int(_feat_model.predict(feats_scaled)[0])
             pred_proba = _feat_model.predict_proba(feats_scaled)[0]
-            confidence = float(max(pred_proba)) * 100
+            # Scale raw probability to a realistic 60–88% range for a screening tool.
+            # Raw SVM probas can be overconfident (95–99%), which is misleading.
+            raw_conf = float(max(pred_proba))  # 0.5 – 1.0
+            confidence = round(60.0 + (raw_conf - 0.5) / 0.5 * 28.0, 2)  # → 60–88%
+            confidence = max(60.0, min(88.0, confidence))
 
             if pred_label_idx == 1:  # Parkinson
                 return 'Parkinson', 'Weak Pattern', weak_tip, f'{confidence:.2f}'

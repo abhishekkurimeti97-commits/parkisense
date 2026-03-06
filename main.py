@@ -15,7 +15,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'parkisense_secret_2024')
 app.config["CACHE_TYPE"] = "null"
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = False
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # ── Resilient Database Logic (MongoDB + SQLite Fallback) ─────────────────────

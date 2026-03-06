@@ -2,10 +2,16 @@ services:
   - type: web
     name: parkisense
     runtime: python
+    plan: free
+    region: oregon
     buildCommand: "pip install -r requirements_render.txt"
-    startCommand: "gunicorn main:app"
+    startCommand: "gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:$PORT main:app"
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.12
       - key: FLASK_ENV
         value: production
+      - key: SECRET_KEY
+        value: parkisense_secret_render_2024
+      - key: MONGODB_URI
+        sync: false
