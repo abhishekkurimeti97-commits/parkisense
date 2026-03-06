@@ -1,12 +1,10 @@
-# import the necessary packages
-from flask import Flask, render_template, redirect, url_for, request, session, Response
+# ── Imports ───────────────────────────────────────────────────────────────────
+from flask import Flask, render_template, redirect, url_for, request, session
 from werkzeug.utils import secure_filename
 from functools import wraps
-import pandas as pd
 from datetime import datetime
 import os
 import time
-import sqlite3
 from utils import *
 from voiceTest import *
 
@@ -18,72 +16,47 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
-# ── Resilient Database Logic (MongoDB + SQLite Fallback) ─────────────────────
+# ── MongoDB (users only: login / register / forgot-password) ──────────────────
 MONGODB_URI = os.environ.get('MONGODB_URI', '')
+_mongo_db = None   # cached at startup
 
-def get_mongodb_client():
-    if MONGODB_URI:
-        try:
-            from pymongo import MongoClient
-            client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
-            # Trigger a ping to check connection
-            client.admin.command('ping')
-            return client
-        except Exception as e:
-            print(f"CRITICAL: MongoDB Connection Failed: {e}. Falling back to SQLite.")
-    return None
-
-def get_db():
-    client = get_mongodb_client()
-    if client:
-        return client['parkisense'], 'mongo'
-    else:
-        conn = sqlite3.connect('mydatabase.db', check_same_thread=False)
-        return conn, 'sqlite'
+def get_users_collection():
+    """Return the MongoDB 'users' collection, or None if unavailable."""
+    global _mongo_db
+    if _mongo_db is not None:
+        return _mongo_db.users
+    if not MONGODB_URI:
+        return None
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        client.admin.command('ping')          # verify connection
+        _mongo_db = client['parkisense']
+        _mongo_db.users.create_index('email', unique=True)
+        print("DEBUG: MongoDB connected successfully.")
+        return _mongo_db.users
+    except Exception as e:
+        print(f"CRITICAL: MongoDB connection failed — {e}")
+        return None
 
 def init_db():
-    """Initialise tables/collections and seed a default user."""
+    """Seed a demo account on startup."""
     os.makedirs('static/img', exist_ok=True)
     os.makedirs('upload', exist_ok=True)
     try:
-        db_obj, db_type = get_db()
-        if db_type == 'mongo':
-            # MongoDB Initialisation
-            db_obj.users.create_index('email', unique=True)
-            if not db_obj.users.find_one({'email': 'demo@parkisense.com'}):
-                db_obj.users.insert_one({
+        col = get_users_collection()
+        if col is not None:
+            if not col.find_one({'email': 'demo@parkisense.com'}):
+                col.insert_one({
                     'date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     'name': 'Demo User',
                     'email': 'demo@parkisense.com',
                     'password': 'demo1234',
                     'pet': 'buddy'
                 })
-            print("DEBUG: MongoDB initialised and seeded.")
+                print("DEBUG: Demo user seeded in MongoDB.")
         else:
-            # SQLite Initialisation
-            cur = db_obj.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    date TEXT, name TEXT NOT NULL, email TEXT PRIMARY KEY, 
-                    password TEXT NOT NULL, pet TEXT
-                )
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS predictions (
-                    date TEXT, name TEXT, drawing_pred TEXT, 
-                    voice_pred TEXT, final_pred TEXT
-                )
-            """)
-            cur.execute("SELECT name FROM users WHERE email=?", ("demo@parkisense.com",))
-            if not cur.fetchone():
-                dt = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                cur.execute(
-                    "INSERT INTO users VALUES (?,?,?,?,?)",
-                    (dt, "Demo User", "demo@parkisense.com", "demo1234", "buddy")
-                )
-            db_obj.commit()
-            db_obj.close()
-            print("DEBUG: SQLite initialised and seeded (Fallback mode).")
+            print("WARNING: No MongoDB URI set. Login will fail until MONGODB_URI is configured.")
     except Exception as e:
         print(f"DEBUG: DB Init Error: {e}")
 
@@ -121,22 +94,16 @@ def login():
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password') or ''
         try:
-            db_obj, db_type = get_db()
-            if db_type == 'mongo':
-                user = db_obj.users.find_one({'email': email, 'password': password})
+            col = get_users_collection()
+            if col is None:
+                error = "Database unavailable. Please try again later."
+            else:
+                user = col.find_one({'email': email, 'password': password})
                 if user:
                     session['name'] = user['name']
                     return redirect(url_for('home'))
-            else:
-                cur = db_obj.cursor()
-                cur.execute("SELECT name FROM users WHERE email=? AND password=?", (email, password))
-                row = cur.fetchone()
-                db_obj.close()
-                if row:
-                    session['name'] = row[0]
-                    return redirect(url_for('home'))
-            
-            error = "Invalid Credentials. Use demo@parkisense.com / demo1234 if you're testing."
+                else:
+                    error = "Invalid credentials. Use demo@parkisense.com / demo1234 if testing."
         except Exception as e:
             print(f"DEBUG: Login error: {e}")
             error = "Temporary connection issue. Please try again."
@@ -167,30 +134,18 @@ def register():
             return render_template('register.html', error=error)
 
         try:
-            db_obj, db_type = get_db()
-            if db_type == 'mongo':
-                if db_obj.users.find_one({'email': email}):
-                    error = 'User already registered!'
-                else:
-                    db_obj.users.insert_one({
-                        'date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                        'name': name,
-                        'email': email,
-                        'password': password,
-                        'pet': pet
-                    })
-                    return redirect(url_for('login'))
+            col = get_users_collection()
+            if col is None:
+                error = "Database unavailable. Please try again later."
+            elif col.find_one({'email': email}):
+                error = 'User already registered!'
             else:
-                cur = db_obj.cursor()
-                cur.execute("SELECT name FROM users WHERE email=?", (email,))
-                if cur.fetchone():
-                    error = 'User already registered!'
-                else:
-                    dt = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    cur.execute("INSERT INTO users VALUES (?,?,?,?,?)", (dt, name, email, password, pet))
-                    db_obj.commit()
-                    db_obj.close()
-                    return redirect(url_for('login'))
+                col.insert_one({
+                    'date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                    'name': name, 'email': email,
+                    'password': password, 'pet': pet
+                })
+                return redirect(url_for('login'))
         except Exception as e:
             print(f"DEBUG: Register error: {e}")
             error = "Database busy. Please try again."
@@ -205,20 +160,13 @@ def forgot():
         email = (request.form.get('email') or '').strip().lower()
         pet = (request.form.get('pet') or '').strip().lower()
         try:
-            db_obj, db_type = get_db()
-            if db_type == 'mongo':
-                user = db_obj.users.find_one({'email': email, 'pet': pet})
+            col = get_users_collection()
+            if col is None:
+                error = "Database unavailable. Please try again later."
+            else:
+                user = col.find_one({'email': email, 'pet': pet})
                 if user:
                     error = 'Your password: ' + user['password']
-                else:
-                    error = 'Information not found.'
-            else:
-                cur = db_obj.cursor()
-                cur.execute("SELECT password FROM users WHERE email=? AND pet=?", (email, pet))
-                row = cur.fetchone()
-                db_obj.close()
-                if row:
-                    error = 'Your password: ' + row[0]
                 else:
                     error = 'Information not found.'
         except Exception as e:
@@ -235,12 +183,11 @@ def home():
     return render_template('home.html')
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# ── Dashboard ───────────────────────────────────────────────────────────────────
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
-    user_name = session.get('name', '')
-    pred = session.get('pred', 'Healthy')
+    pred      = session.get('pred', 'Healthy')
     voicePred = session.get('voicePred', 'Healthy')
 
     if pred == 'Parkinson' and voicePred == 'Parkinson':
@@ -248,39 +195,12 @@ def dashboard():
     elif pred == 'Healthy' and voicePred == 'Healthy':
         final = 'Healthy'
     else:
-        final = 'Further Diagnosis is Required'
+        final = 'Further Diagnosis Required'
 
-    now = datetime.now()
-    dt_str = now.strftime("%d/%m/%Y %H:%M:%S")
-    
-    try:
-        db_obj, db_type = get_db()
-        if db_type == 'mongo':
-            db_obj.predictions.insert_one({
-                'date': dt_str,
-                'name': user_name,
-                'drawing_pred': pred,
-                'voice_pred': voicePred,
-                'final_pred': final
-            })
-            records = list(db_obj.predictions.find({'name': user_name}, {'_id': 0}))
-            df = pd.DataFrame(records)
-        else:
-            cur = db_obj.cursor()
-            cur.execute("INSERT INTO predictions VALUES (?,?,?,?,?)", (dt_str, user_name, pred, voicePred, final))
-            db_obj.commit()
-            cur.execute("SELECT * FROM predictions WHERE name=?", (user_name,))
-            rows = cur.fetchall()
-            db_obj.close()
-            df = pd.DataFrame(rows, columns=['Date', 'Name', 'DrawingPrediction', 'VoicePrediction', 'FinalPrediction'])
-    except Exception as e:
-        print(f"DEBUG: Dashboard error: {e}")
-        df = pd.DataFrame(columns=['Date', 'Name', 'DrawingPrediction', 'VoicePrediction', 'FinalPrediction'])
-
-    now_date = now.strftime("%d %B %Y, %H:%M")
+    now_date = datetime.now().strftime("%d %B %Y, %H:%M")
     return render_template('dashboard.html',
-                           tables=[df.to_html(classes='table-responsive table table-bordered table-hover')],
-                           titles=df.columns.values, now_date=now_date)
+                           pred=pred, voice_pred=voicePred,
+                           final=final, now_date=now_date)
 
 
 # ── Spiral/Image Test ─────────────────────────────────────────────────────────
