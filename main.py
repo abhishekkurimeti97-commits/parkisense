@@ -18,25 +18,44 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # ── MongoDB (users only: login / register / forgot-password) ──────────────────
 MONGODB_URI = os.environ.get('MONGODB_URI', '')
-_mongo_db = None   # cached at startup
+_mongo_client = None   # MongoClient (kept alive for connection pooling)
+_mongo_db     = None   # parkisense database handle
 
 def get_users_collection():
-    """Return the MongoDB 'users' collection, or None if unavailable."""
-    global _mongo_db
-    if _mongo_db is not None:
-        return _mongo_db.users
+    """Return MongoDB 'users' collection. Reconnects automatically if needed."""
+    global _mongo_client, _mongo_db
+
+    # --- health-check cached connection ---
+    if _mongo_client is not None:
+        try:
+            _mongo_client.admin.command('ping', check=False)
+            return _mongo_db.users
+        except Exception:
+            # Connection dropped — reset and fall through to reconnect
+            print("DEBUG: MongoDB ping failed, reconnecting...")
+            _mongo_client = None
+            _mongo_db     = None
+
     if not MONGODB_URI:
         return None
+
     try:
         from pymongo import MongoClient
-        client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
-        client.admin.command('ping')          # verify connection
-        _mongo_db = client['parkisense']
+        _mongo_client = MongoClient(
+            MONGODB_URI,
+            serverSelectionTimeoutMS=8000,
+            connectTimeoutMS=8000,
+            socketTimeoutMS=8000,
+        )
+        _mongo_client.admin.command('ping')
+        _mongo_db = _mongo_client['parkisense']
         _mongo_db.users.create_index('email', unique=True)
         print("DEBUG: MongoDB connected successfully.")
         return _mongo_db.users
     except Exception as e:
         print(f"CRITICAL: MongoDB connection failed — {e}")
+        _mongo_client = None
+        _mongo_db     = None
         return None
 
 def init_db():
