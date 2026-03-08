@@ -210,9 +210,11 @@ def dashboard():
     voicePred = session.get('voicePred', 'Healthy')
 
     if pred == 'Parkinson' and voicePred == 'Parkinson':
-        final = 'Weak Pattern'
+        final = 'Clinical Consultation Recommended'
     elif pred == 'Healthy' and voicePred == 'Healthy':
-        final = 'Healthy'
+        final = 'Healthy (Low Risk)'
+    elif pred == 'Parkinson' or voicePred == 'Parkinson':
+        final = 'Potential Early Indicators'
     else:
         final = 'Further Diagnosis Required'
 

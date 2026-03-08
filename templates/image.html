@@ -947,7 +947,10 @@
 	uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('over'));
 	uploadZone.addEventListener('drop', e => {
 		e.preventDefault(); uploadZone.classList.remove('over');
-		if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+		if (e.dataTransfer.files[0]) {
+			document.getElementById('upload_file').files = e.dataTransfer.files;
+			handleFile(e.dataTransfer.files[0]);
+		}
 	});
 
 	function handleFile(file) {

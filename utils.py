@@ -246,8 +246,18 @@ def predictImg(image_path='static/img/test.jpg'):
                 'Please draw a spiral pattern (a coil starting from the centre outward). '
                 'Random shapes or lines cannot be analysed for Parkinson\'s indicators.', '0')
 
+    # ── Detect if it's a digital canvas drawing vs a photo ────────────────────
+    gray_arr_check = np.asarray(gray, dtype=np.float32)
+    inv_check = 255.0 - gray_arr_check
+    bg_mask = inv_check < 30.0
+    is_digital_canvas = False
+    if np.sum(bg_mask) > 0:
+        bg_std = float(np.std(gray_arr_check[bg_mask]))
+        if bg_std < 5.0:
+            is_digital_canvas = True
+
     # ── Step 2: Feature-based SVM model (PRIMARY — 85.8% CV accuracy) ─────────
-    if _feat_model is not None and _feat_scaler is not None:
+    if not is_digital_canvas and _feat_model is not None and _feat_scaler is not None:
         try:
             from skimage.feature import hog, local_binary_pattern
             from skimage.transform import resize
@@ -270,14 +280,24 @@ def predictImg(image_path='static/img/test.jpg'):
             confidence = round(raw_conf * 100.0, 2)
 
             if pred_label_idx == 1:  # Parkinson
-                return 'Parkinson', 'Weak Pattern', weak_tip, f'{confidence:.2f}'
+                if confidence > 90:
+                    display_label = 'Strong Indicators Detected'
+                elif confidence > 75:
+                    display_label = 'Parkinson\'s Pattern'
+                else:
+                    display_label = 'Weak Indicators Detected'
+                return 'Parkinson', display_label, weak_tip, f'{confidence:.2f}'
             else:
-                return 'Healthy', 'Healthy Drawing Sample', healthy_tip, f'{confidence:.2f}'
+                if confidence > 90:
+                    display_label = 'Healthy Control Sample'
+                else:
+                    display_label = 'Likely Healthy Sample'
+                return 'Healthy', display_label, healthy_tip, f'{confidence:.2f}'
         except Exception as e:
             print(f"DEBUG: Feature model prediction error: {e}")
 
     # ── Step 3: Keras CNN fallback ─────────────────────────────────────────────
-    if model is not None:
+    if not is_digital_canvas and model is not None:
         from PIL import ImageOps
         size = (224, 224)
         try:
@@ -303,34 +323,32 @@ def predictImg(image_path='static/img/test.jpg'):
         label = labels_map.get(idx, 'Healthy')
         
         if label == 'Parkinson':
-            return 'Parkinson', 'Weak Pattern', weak_tip, f'{cnn_confidence:.2f}'
+            if cnn_confidence > 90:
+                display_label = 'Strong Indicators'
+            elif cnn_confidence > 75:
+                display_label = 'Parkinson\'s Pattern'
+            else:
+                display_label = 'Weak indicators'
+            return 'Parkinson', display_label, weak_tip, f'{cnn_confidence:.2f}'
         else:
             return 'Healthy', 'Healthy Drawing Sample', healthy_tip, f'{cnn_confidence:.2f}'
 
-    # ── Step 3: Fallback — geometric reversal rate only (if no CNN) ───────────
-    # When CNN is unavailable, use reversal_rate as a weak signal.
-    # Healthy spirals tend to have fewer direction reversals than Parkinson's.
-    # Confidence is intentionally moderate (50-70%) to reflect uncertainty.
-    gray_arr = np.asarray(gray, dtype=np.float32)
-    inv = 255.0 - gray_arr
-    drawn_mask = inv > 30.0
-    ys, xs = np.where(drawn_mask)
-    if len(xs) > 80:
-        cx, cy = float(np.mean(xs)), float(np.mean(ys))
-        dx, dy = xs - cx, ys - cy
-        r = np.sqrt(dx**2 + dy**2)
-        theta = np.arctan2(dy, dx)
-        order = np.argsort(theta)
-        r_sorted = r[order]
-        dr = np.diff(r_sorted)
-        sign_changes = int(np.sum(np.diff(np.sign(dr)) != 0))
-        reversal_rate = sign_changes / max(len(dr), 1)
-
-        if reversal_rate > 0.52:
-            conf = min(68.0, 55.0 + (reversal_rate - 0.52) * 200)
-            return 'Parkinson', 'Weak Pattern', weak_tip, f'{conf:.2f}'
+    # ── Step 4: Fallback — geometric analysis (if no CNN or digital canvas) ───
+    # For digital canvases, the geometric tremor_index provides real dynamic results.
+    threshold = 4.5
+    if tremor_index > threshold:
+        conf = min(99.0, 50.0 + (tremor_index - threshold) * 8.0)
+        if conf > 85:
+            display_label = "Strong Indicators Detected"
+        elif conf > 70:
+            display_label = "Parkinson's Pattern"
         else:
-            conf = min(65.0, 55.0 + (0.52 - reversal_rate) * 100)
-            return 'Healthy', 'Healthy Drawing Sample', healthy_tip, f'{conf:.2f}'
-
-    return 'Healthy', 'Healthy Drawing Sample', healthy_tip, '55.00'
+            display_label = "Weak Indicators Detected"
+        return 'Parkinson', display_label, weak_tip, f'{conf:.2f}'
+    else:
+        conf = min(99.0, 50.0 + (threshold - tremor_index) * 33.0)
+        if conf > 85:
+            display_label = "Healthy Control Sample"
+        else:
+            display_label = "Likely Healthy Sample"
+        return 'Healthy', display_label, healthy_tip, f'{conf:.2f}'

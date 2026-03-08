@@ -1,0 +1,2 @@
+('Healthy', 'Healthy Control Sample', 'Your drawing shows smooth, consistent lines. Maintain hand-eye coordination exercises.', '98.12')
+('Parkinson', 'Strong Indicators Detected', 'Tremor-like patterns noted. Consult a neurologist for a professional screening.', '98.54')
