@@ -60,19 +60,17 @@ def get_users_collection():
     """Return MongoDB 'users' collection. Reconnects automatically if needed."""
     global _mongo_client, _mongo_db
 
-    # --- health-check cached connection ---
+    # --- Use existing connection if available ---
     if _mongo_client is not None:
         try:
-            _mongo_client.admin.command('ping', check=False)
             return _mongo_db.users
-        except Exception as e:
-            # Connection dropped — reset and fall through to reconnect
-            print(f"DEBUG: MongoDB ping failed, reconnecting... error: {e}")
+        except Exception:
+            # Handle potential dropped connection handles
             _mongo_client = None
             _mongo_db     = None
 
     if not MONGODB_URI:
-        print("CRITICAL: MONGODB_URI is empty or not set in environment!")
+        print("CRITICAL: MONGODB_URI is empty!")
         return None
 
     try:
@@ -84,15 +82,16 @@ def get_users_collection():
             socketTimeoutMS=5000,
             retryWrites=True
         )
-        # Attempt an actual command to trigger connection
-        _mongo_client.admin.command('ping')
+        # We'll try to get the database handle. If auth fails later during a query, Flask will catch it.
         _mongo_db = _mongo_client['parkisense']
-        _mongo_db.users.create_index('email', unique=True)
-        print("DEBUG: MongoDB connected successfully.")
+        # We try to create index but don't strictly crash here
+        try:
+            _mongo_db.users.create_index('email', unique=True)
+        except:
+            pass
         return _mongo_db.users
     except Exception as e:
-        print(f"CRITICAL: MongoDB connection failed — {e}")
-        # Reset cached handles so we retry next time
+        print(f"CRITICAL: MongoClient setup failed — {e}")
         _mongo_client = None
         _mongo_db     = None
         return None
