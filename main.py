@@ -343,6 +343,39 @@ def record():
     return render_template('record.html')
 
 
+# ── Diagnostic Route ──────────────────────────────────────────────────────────
+@app.route('/diagnose')
+def diagnose():
+    """Check system status for troubleshooting."""
+    status = {
+        "status": "online",
+        "mongodb": "unknown",
+        "encryption": "unknown",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+    # Test MongoDB
+    try:
+        col = get_users_collection()
+        if col is not None:
+            # Simple ping
+            _mongo_client.admin.command('ping')
+            status["mongodb"] = "CONNECTED"
+            status["users_count"] = col.count_documents({})
+        else:
+            status["mongodb"] = "NOT_CONFIGURED (URI empty)"
+    except Exception as e:
+        status["mongodb"] = f"ERROR: {str(e)}"
+
+    # Test Encryption
+    if fernet:
+        status["encryption"] = "READY"
+    else:
+        status["encryption"] = "NOT_READY (Invalid format or key missing)"
+
+    return status
+
+
 @app.after_request
 def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
