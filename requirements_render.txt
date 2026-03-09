@@ -5,6 +5,7 @@ gunicorn
 
 # Database
 dnspython
+pymongo[srv]
 
 # ML Fallbacks / Math
 pandas
