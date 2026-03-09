@@ -355,6 +355,7 @@ def diagnose():
         "status": "online",
         "mongodb": "unknown",
         "encryption": "unknown",
+        "key_prefix": "N/A",
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
@@ -374,6 +375,8 @@ def diagnose():
     # Test Encryption
     if fernet:
         status["encryption"] = "READY"
+        if ENCRYPTION_KEY:
+             status["key_prefix"] = ENCRYPTION_KEY[:4] + "..."
     else:
         status["encryption"] = "NOT_READY (Invalid format or key missing)"
 
