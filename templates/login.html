@@ -684,10 +684,11 @@
                         Sign In <i class="fas fa-arrow-right"></i>
                     </button>
 
+                    {% if google_client_id and google_client_id != 'PASTE_YOUR_GOOGLE_CLIENT_ID_HERE' %}
                     <div class="or-divider"><span class="or-text">or</span></div>
 
-                    <!-- Google Login Hook -->
-                    <div id="g_id_onload" data-client_id="{{ google_client_id or 'PASTE_YOUR_GOOGLE_CLIENT_ID_HERE' }}"
+                    <!-- Google Login Hook - only rendered when a real Client ID is set -->
+                    <div id="g_id_onload" data-client_id="{{ google_client_id }}"
                         data-context="signin" data-ux_mode="popup" data-callback="handleCredentialResponse"
                         data-auto_prompt="false" data-itp_support="true">
                     </div>
@@ -695,6 +696,7 @@
                     <div class="google-btn-wrapper">
                         <div id="googleBtn"></div>
                     </div>
+                    {% endif %}
                 </form>
 
                 <div class="or-divider"><span class="or-text">or</span></div>
@@ -736,9 +738,10 @@
         }
 
         window.onload = function () {
-            if (window.google) {
+            const googleBtnEl = document.getElementById("googleBtn");
+            if (window.google && googleBtnEl) {
                 google.accounts.id.renderButton(
-                    document.getElementById("googleBtn"),
+                    googleBtnEl,
                     {
                         theme: "filled_blue",
                         size: "large",
