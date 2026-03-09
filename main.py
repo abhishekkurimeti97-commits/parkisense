@@ -12,6 +12,13 @@ from dotenv import load_dotenv
 from utils import *
 from voiceTest import *
 
+# Google Login
+try:
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
+except ImportError:
+    pass
+
 # Load environment variables
 load_dotenv()
 
@@ -167,8 +174,51 @@ def login():
             print(f"DEBUG: Login error: {e}")
             error = "Database unreachable. Please try again."
         
-        return render_template('login.html', error=error)
-    return render_template('login.html')
+        return render_template('login.html', error=error, google_client_id=os.environ.get('GOOGLE_CLIENT_ID'))
+    return render_template('login.html', google_client_id=os.environ.get('GOOGLE_CLIENT_ID'))
+
+
+@app.route('/login-google', methods=['POST'])
+def login_google():
+    token = request.form.get('id_token')
+    if not token:
+        return redirect(url_for('login'))
+        
+    client_id = os.environ.get('GOOGLE_CLIENT_ID')
+    if not client_id:
+        return render_template('login.html', error="Google Login is not configured on this server (Missing Client ID).")
+        
+    try:
+        # Verify the token
+        idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+        
+        email = idinfo['email'].lower()
+        name = idinfo.get('name', 'Google User')
+        
+        col = get_users_collection()
+        if col is None:
+             return render_template('login.html', error="Database connection failed.")
+             
+        user = col.find_one({'email': email})
+        if not user:
+            # Register them instantly with encrypted name
+            col.insert_one({
+                'date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                'name': encrypt_data(name),
+                'email': email,
+                'password': generate_password_hash(os.urandom(24).hex()), # Secure random password
+                'pet': encrypt_data('google-auth-safe')
+            })
+        else:
+            # Update name if it's not encrypted yet or changed
+            col.update_one({'email': email}, {'$set': {'name': encrypt_data(name)}})
+            
+        session['name'] = name
+        return redirect(url_for('home'))
+        
+    except Exception as e:
+        print(f"DEBUG: Google Auth Error: {e}")
+        return render_template('login.html', error="Google Authentication failed.")
 
 
 # ── Logout ────────────────────────────────────────────────────────────────────
